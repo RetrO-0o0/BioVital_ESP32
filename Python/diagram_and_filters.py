@@ -25,7 +25,7 @@ def main():
 
 
 def exponential_dc_removal(raw_data) -> np.ndarray[np.any]:
-    a  = 0.0248
+    a  = 0.0314
     y  = []
     dc = raw_data[0]
 
