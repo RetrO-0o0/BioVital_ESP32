@@ -4,17 +4,17 @@ import matplotlib.pyplot as plt
 
 def main():
     data = pd.read_csv("D:\\ALI007\\Programming\\Summer Project\\Python\\ppg_samples.csv")
-    print(data.head())
+    # print(data.head())
 
     ir = data["ir"].to_numpy()
 
     #DC Removal
-    # dc_filtered_data = exponential_dc_removal(ir)
+    dc_filtered_data = np.array(exponential_dc_removal(ir))
 
     plt.figure()
-    plt.plot(ir)
+    plt.plot(dc_filtered_data)
     plt.title("MAX30102 SENSOR VALUES")
-    plt.ylabel("Raw IR Values")
+    plt.ylabel("DC Filtered Values")
 
     manager = plt.get_current_fig_manager()
     manager.full_screen_toggle()
@@ -23,9 +23,16 @@ def main():
 
 
 
-# def exponential_dc_removal(raw_data) -> np.np_1darray[np.Any]:
-#     dc = 0
-#     a  = 0.0125
+def exponential_dc_removal(raw_data) -> np.ndarray[np.any]:
+    a  = 0.0125
+    y  = []
+    dc = 0
+
+    for x in raw_data:
+        dc = dc + a * (x - dc)
+        y.append(x - dc)
+
+    return y
 
 
 if __name__ == "__main__":
