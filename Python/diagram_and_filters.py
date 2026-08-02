@@ -14,6 +14,7 @@ def main():
     plt.figure()
     plt.plot(dc_filtered_data)
     plt.title("MAX30102 SENSOR VALUES")
+    plt.xlabel("Samples")
     plt.ylabel("DC Filtered Values")
 
     manager = plt.get_current_fig_manager()
@@ -24,7 +25,7 @@ def main():
 
 
 def exponential_dc_removal(raw_data) -> np.ndarray[np.any]:
-    a  = 0.0125
+    a  = 0.0248
     y  = []
     dc = raw_data[0]
 
