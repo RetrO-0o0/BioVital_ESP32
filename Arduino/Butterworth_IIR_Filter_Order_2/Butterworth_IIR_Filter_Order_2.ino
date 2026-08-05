@@ -3,10 +3,6 @@
 
 #define serial Serial
 
-MAX30105 particleSensor;
-
-
-
 class IIRFilter
 {
 private:
@@ -47,27 +43,102 @@ public:
 
         return y;
     }
+};
 
-    static float moving_average(float input)
+class MovingAverage 
+{
+private:
+
+    static constexpr int WINDOW {5};
+
+    float buffer[WINDOW]    =   {0};
+    float sum                   {0};
+    uint8_t idx                 {0};
+
+
+public:
+    float process(float input)
     {
-        static int idx           {0};
-        static float sum         {0};
-        static float buffer[5] = {0};
+        this->sum -= buffer[idx];
 
-        sum -= buffer[idx];
+        this->buffer[idx] = input;
 
-        buffer[idx] = input;
+        this->sum += input;
 
-        sum += input;
+        idx = (idx + 1) % WINDOW;
 
-        idx++;
-        idx %= 5;
-
-        return sum / 5.0;
+        return sum / WINDOW;
     }
 };
 
 
+class PeakDetector 
+{
+private:
+
+    float const THRESHOLD     {0.0};
+    uint32_t const REFRACTORY {30};
+
+    float prev;
+    float curr;
+    float bpm;
+
+    uint32_t last_peak_sample;
+    uint32_t sample_counter;
+
+    bool initialized               {false};
+
+public:
+
+    bool process(float sample)
+    {
+        sample_counter++;
+
+        if(!initialized)
+        {
+            prev = sample;
+            curr = sample;
+            initialized = true;
+            return false;
+        }
+
+        float next = sample;
+
+        bool peak =
+            (curr > prev) &&
+            (curr > next) &&
+            (curr > THRESHOLD);
+
+        if(peak)
+        {
+            if(sample_counter - last_peak_sample > REFRACTORY)
+            {
+                if(last_peak_sample != 0)
+                {
+                    uint32_t interval = sample_counter - last_peak_sample;
+                    bpm = 6000.0f / interval;
+                }
+
+                last_peak_sample = sample_counter;
+            }
+            else
+            {
+                peak = false;
+            }
+        }
+
+        prev = curr;
+        curr = next;
+
+        return peak;
+    }
+
+    // float getBPM();
+};
+
+
+// Sensor Object
+MAX30105 particleSensor;
 
 // High Pass 0.5Hz
 IIRFilter highPass(
@@ -90,6 +161,11 @@ IIRFilter lowPass(
 );
 
 
+// Moving Average Object
+MovingAverage moving_average;
+
+// Peak Detector Object
+PeakDetector peak_detector;
 
 void setup()
 {
@@ -134,9 +210,11 @@ void loop()
 
         float hp = highPass.process(irRaw);
         float lp = lowPass.process(hp);
-        float mv = IIRFilter::moving_average(lp);
+        float mv = moving_average.process(lp);
+        bool  pk = peak_detector.process(mv);
 
-        serial.println(mv);
+        if (pk)
+            serial.println("pulse");
 
         particleSensor.nextSample();
     }
