@@ -86,7 +86,7 @@ private:
     uint32_t last_peak_sample;
     uint32_t sample_counter;
 
-    bool initialized               {false};
+    bool initialized          {false};
 
 public:
 
@@ -94,32 +94,28 @@ public:
     {
         sample_counter++;
 
-        if(!initialized)
+        if(!this->initialized)
         {
-            prev = sample;
-            curr = sample;
-            initialized = true;
+            this->prev        = sample;
+            this->curr        = sample;
+            this->initialized = true;
             return false;
         }
 
         float next = sample;
 
-        bool peak =
-            (curr > prev) &&
-            (curr > next) &&
-            (curr > THRESHOLD);
-
+        bool peak  = (this->curr > this->prev) && (this->curr > next) && (this->curr > this->THRESHOLD);
         if(peak)
         {
-            if(sample_counter - last_peak_sample > REFRACTORY)
+            if(this->sample_counter - this->last_peak_sample > this->REFRACTORY)
             {
-                if(last_peak_sample != 0)
+                if(this->last_peak_sample != 0)
                 {
-                    uint32_t interval = sample_counter - last_peak_sample;
-                    bpm = 6000.0f / interval;
+                    uint32_t interval = this->sample_counter - this->last_peak_sample;
+                    this->bpm         = 6000.0f / interval; // BPM =  Fs(=100Hz) * 60(seconds) / Interval
                 }
 
-                last_peak_sample = sample_counter;
+                this->last_peak_sample = this->sample_counter;
             }
             else
             {
@@ -127,13 +123,19 @@ public:
             }
         }
 
-        prev = curr;
-        curr = next;
+        this->prev = this->curr;
+        this->curr = next;
 
         return peak;
     }
 
-    // float getBPM();
+    float getBPM()
+    {
+        // serial.print("BPM: ");
+        // serial.println(this->bpm);
+
+        return this->bpm;
+    }
 };
 
 
@@ -214,7 +216,10 @@ void loop()
         bool  pk = peak_detector.process(mv);
 
         if (pk)
-            serial.println("pulse");
+        {
+            serial.print("BPM: ");
+            serial.println(peak_detector.getBPM());
+        }
 
         particleSensor.nextSample();
     }
