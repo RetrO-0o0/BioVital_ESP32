@@ -43,6 +43,15 @@ public:
 
         return y;
     }
+
+    void reset()
+    {
+        this->x1 = 0;
+        this->x2 = 0;
+        
+        this->y1 = 0;
+        this->y2 = 0;
+    }
 };
 
 class MovingAverage 
@@ -69,6 +78,15 @@ public:
 
         return sum / WINDOW;
     }
+
+    void reset()
+    {
+        this->sum = 0.0;
+        this->idx = 0;
+
+        for (int i = 0; i < this->WINDOW; i++)
+            this->buffer[i] = 0.0;
+    }
 };
 
 
@@ -76,7 +94,7 @@ class PeakDetector
 {
 private:
 
-    float const THRESHOLD     {0.0};
+    float THRESHOLD     {0.0};
     uint32_t const REFRACTORY {30};
 
     float prev;
@@ -104,6 +122,8 @@ public:
 
         float next = sample;
 
+        this->THRESHOLD *= 0.99f;
+        
         bool peak  = (this->curr > this->prev) && (this->curr > next) && (this->curr > this->THRESHOLD);
         if(peak)
         {
