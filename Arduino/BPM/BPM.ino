@@ -201,10 +201,15 @@ public:
         return false;
     }
 
-
     float getBPM()
     {
         return calculatedBPM;
+    }
+
+
+    float getCalculatedBPM()
+    {
+        return this->calculatedBPM;
     }
 
 
@@ -220,6 +225,42 @@ public:
     }
 };
 
+class Smoothing
+{
+private:
+    float buffer[5] = {0.0};
+    float sum         {0.0};
+    float avg         {0.0};
+    int idx           {0};
+
+public:
+    void process(PeakDetector input)
+    {
+        this->sum -= buffer[this->idx];
+
+        this->buffer[this->idx] = input.getCalculatedBPM();
+
+        this->sum += input.getCalculatedBPM();
+
+        this->idx = (this->idx + 1) % 5;
+
+        this->avg =  this->sum / 5;
+    }
+
+    void reset()
+    {
+        for (int i = 0; i < 5; i++)
+            this->buffer[i] = 0;
+
+        this->sum = 0;
+        this->idx = 0;
+    }
+
+    float getAvg()
+    {
+        return this->avg;
+    }
+};
 
 MAX30105 particleSensor;
 
@@ -243,6 +284,7 @@ MovingAverage movingAverage;
 
 PeakDetector peakDetector;
 
+Smoothing smooth;
 
 // Reset Function
 void resetSignalProcessing()
@@ -251,6 +293,8 @@ void resetSignalProcessing()
     lowPass.reset();
     movingAverage.reset();
     peakDetector.reset();
+    smooth.reset();
+
 }
 
 
@@ -308,11 +352,12 @@ void loop()
         }
 
 
-        float signal      =    static_cast<float>(irRaw);      // RAW SIGNAL
-        float hp          =    highPass.process(signal);       // BAND-PASS
-        float lp          =    lowPass.process(hp);            // BAND-PASS
-        float filtered    =    movingAverage.process(lp);      // MOVING AVERAGE
-        bool  peak        =    peakDetector.process(filtered); // PEAK DETECTION
+        float  signal      =    static_cast<float>(irRaw);      // RAW SIGNAL
+        float  hp          =    highPass.process(signal);       // BAND-PASS
+        float  lp          =    lowPass.process(hp);            // BAND-PASS
+        float  filtered    =    movingAverage.process(lp);      // MOVING AVERAGE
+        bool   peak        =    peakDetector.process(filtered); // PEAK DETECTION
+        smooth.process(peakDetector);                           // SMOOTHING
 
 
         unsigned long current_time = millis();
@@ -332,7 +377,7 @@ void loop()
         {
             last_display_time = current_time;
 
-            float bpm = peakDetector.getBPM();
+            int bpm = static_cast<int>(smooth.getAvg());
 
             serial.print("BPM: ");
             serial.println(bpm, 1);
