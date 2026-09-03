@@ -5,12 +5,13 @@
 
 #include "SpO2Handler.hpp"
 #include "BPMHandler.hpp"
+#include "Bitmap.hpp"
 
 // ---------------------------------------------------------
 // Button Pins
 // ---------------------------------------------------------
-#define BTN_NAVIGATE 14
-#define BTN_SELECT   15
+#define BTN_NAVIGATE 23
+#define BTN_SELECT   4
 
 // ---------------------------------------------------------
 // Objects
@@ -86,16 +87,38 @@ void drawMenu()
 
 void drawSpO2() 
 {
-    u8g2.setFont(u8g2_font_helvB08_tr);
-    u8g2.drawStr(0, 12, "SpO2 Monitor");
-    u8g2.drawLine(0, 15, 128, 15);
+    // u8g2.setFont(u8g2_font_helvB08_tr);
+    // u8g2.drawStr(0, 12, "SpO2 Monitor");
+    // u8g2.drawLine(0, 15, 128, 15);
 
     int state = spo2Handler.getUIState();
     
     if (state == 0) 
     {
-        u8g2.setFont(u8g2_font_helvB08_tr);
-        u8g2.drawStr(0, 36, "Place Finger...");
+        unsigned long        currentTime  = millis();
+        static uint8_t       spo2SplashState {0};
+        static unsigned long prevSplash      {0};
+        if ((currentTime - prevSplash >= ANIMATION_INTERVAL) || (prevSplash == 0))
+        {
+            prevSplash      = currentTime;
+
+            spo2SplashState = (spo2SplashState + 1) % 3;
+        }
+
+        switch (spo2SplashState)
+        {
+            case 0:
+                u8g2.drawXBMP(0, 0, 128, 64, SpO2_1);
+                break;
+            case 1:
+                u8g2.drawXBMP(0, 0, 128, 64, SpO2_2);
+                break;
+            case 2:
+                u8g2.drawXBMP(0, 0, 128, 64, SpO2_3);
+                break;
+            default:
+                break;
+        }
     } 
     else if (state == 1) 
     {
@@ -139,14 +162,23 @@ void drawSpO2()
 
 void drawBPM() 
 {
-    u8g2.setFont(u8g2_font_helvB08_tr);
-    u8g2.drawStr(0, 12, "BPM Monitor");
-    u8g2.drawLine(0, 16, 128, 16);
+    // u8g2.setFont(u8g2_font_helvB08_tr);
+    // u8g2.drawStr(0, 12, "BPM Monitor");
+    // u8g2.drawLine(0, 16, 128, 16);
 
     if (bpm_ui_state == 0) 
     {
-        u8g2.drawStr(0, 32, "Place Finger...");
-        
+        unsigned long        currentTime  = millis();
+        static bool          bpmSplashState {false};
+        static unsigned long prevSplash     {0};
+        if ((currentTime - prevSplash >= ANIMATION_INTERVAL) || (prevSplash == 0))
+        {
+            prevSplash     = currentTime;
+
+            bpmSplashState = !bpmSplashState;
+        }
+
+        u8g2.drawXBMP(0, 0, 128, 64, (bpmSplashState ? BPM_1 : BPM_2));
     } 
     else if (bpm_ui_state == 1) 
     {
