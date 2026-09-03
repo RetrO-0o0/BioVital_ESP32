@@ -162,11 +162,6 @@ public:
         return calculatedBPM;
     }
 
-    float getCalculatedBPM()
-    {
-        return this->calculatedBPM;
-    }
-
     void reset()
     {
         lastSample = 0;
@@ -211,7 +206,7 @@ public:
 MAX30105 particleSensor;
 
 IIRFilter highPass(
-    0.978030479,
+    0.9780304   79,
    -1.956060958,
     0.978030479,
    -1.955578240,

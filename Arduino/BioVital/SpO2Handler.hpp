@@ -1,29 +1,38 @@
-#ifndef SPO2_HANDLER_HPP
-#define SPO2_HANDLER_HPP
+#pragma once
 
 #include <Arduino.h>
+#include <math.h>
 
-#define WINDOW_SIZE 1000
+class SpO2Handler 
+{
+private:
+    static constexpr int WINDOW_SIZE = 1000;
+    float                irACBuffer[WINDOW_SIZE];
+    float                redACBuffer[WINDOW_SIZE];
+    
+    int   sampleCount;
+    int   warmupCount;
+    
+    float dcIR;
+    float dcRed;
+    float w_ir;
+    float w_red;
+    
+    bool  is_initialized;
+    
+    int   spo2_ui_state;      // 0: No Finger, 1: Stabilizing, 2: Recording, 3: Result
+    float spo2_final_result;
+    int   spo2_progress;
 
-extern float irACBuffer[WINDOW_SIZE];
-extern float redACBuffer[WINDOW_SIZE];
-extern int sampleIndex;
-extern int sampleCount;
+public:
+    SpO2Handler();
 
-extern float dcIR;
-extern float dcRed;
-extern float prevRawIR;
-extern float prevRawRed;
-extern float prevACIR;
-extern float prevACRed;
+    void reset();
+    void process(long irRaw, long redRaw);
 
-extern float spo2_final_result;
-extern int spo2_ui_state; 
-extern int spo2_progress;
-extern float spo2_dc_warmup_sec;
-
-void resetSignalProcessingSpO2();
-void processSpO2(uint32_t irRaw, uint32_t redRaw);
-
-#endif // SPO2_HANDLER_HPP
-
+    // Getters برای استفاده در UI
+    int   getUIState() const;
+    float getFinalResult() const;
+    int   getProgress() const;
+    int   getWarmupRemainingSeconds() const;
+};

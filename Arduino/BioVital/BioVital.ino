@@ -1,168 +1,291 @@
 #include <Wire.h>
+#include <U8g2lib.h>
+#include <Button2.h>
 #include "MAX30105.h"
-#include <Adafruit_GFX.h>
-#include <Adafruit_SSD1306.h>
 
-#include "BPMHandler.hpp"
 #include "SpO2Handler.hpp"
+#include "BPMHandler.hpp"
 
-#define SCREEN_WIDTH 128
-#define SCREEN_HEIGHT 64
-#define OLED_RESET -1
-Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
-
+// ---------------------------------------------------------
+// Button Pins
+// ---------------------------------------------------------
 #define BTN_NAVIGATE 14
 #define BTN_SELECT   15
 
-unsigned long lastNavPress = 0;
-unsigned long lastSelPress = 0;
-const unsigned long DEBOUNCE_DELAY = 250;
-
-int systemState = 0; 
-int menuCursor = 1;  
-
+// ---------------------------------------------------------
+// Objects
+// ---------------------------------------------------------
 MAX30105 particleSensor;
 
-void setup() {
-    Serial.begin(115200);
+SpO2Handler spo2Handler;
 
-    pinMode(BTN_NAVIGATE, INPUT_PULLUP);
-    pinMode(BTN_SELECT, INPUT_PULLUP);
+Button2 btnNav;
+Button2 btnSel;
 
-    if(!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
-        Serial.println(F("SSD1306 allocation failed"));
-        for(;;);
-    }
-    display.clearDisplay();
-    display.setTextColor(SSD1306_WHITE);
+U8G2_SSD1306_128X64_NONAME_F_HW_I2C u8g2(U8G2_R0, /* reset=*/ U8X8_PIN_NONE);
 
-    if (!particleSensor.begin(Wire, I2C_SPEED_FAST)) {
-        Serial.println("MAX30102 was not found. Please check wiring/power.");
-        while (1);
-    }
+// ---------------------------------------------------------
+// State Machine
+// ---------------------------------------------------------
+uint8_t systemState        = 0; // 0: Menu, 1: SpO2, 2: BPM
+bool menuCursor            = 0; // 0: SpO2, 1: BPM
+unsigned long lastDrawTime = 0;
 
-    particleSensor.setup(60, 1, 2, 100, 411, 4096);
-    particleSensor.clearFIFO();
+// ---------------------------------------------------------
+// 
+// ---------------------------------------------------------
+void onNavClick(Button2& btn) 
+{
+    if (systemState == 0) 
+        menuCursor = !menuCursor;
 }
 
-void loop() {
-    unsigned long now = millis();
+void onSelClick(Button2& btn) 
+{
+    if (systemState == 0) 
+    {
+        systemState = (menuCursor == 0) ? 1 : 2;
+        
+        if (systemState == 1) 
+        {
+            spo2Handler.reset();
+        } 
+        else 
+        {
+            resetSignalProcessingBPM();
+        }
+        particleSensor.clearFIFO();
+    } 
+    else 
+    {
+        systemState = 0;
+    }
+}
 
-    if (digitalRead(BTN_NAVIGATE) == LOW && (now - lastNavPress > DEBOUNCE_DELAY)) {
-        lastNavPress = now;
-        if (systemState == 0) {
-            menuCursor = (menuCursor == 1) ? 2 : 1;
+// ---------------------------------------------------------
+// SSD1306 Menu
+// ---------------------------------------------------------
+void drawMenu() 
+{
+    u8g2.setFont(u8g2_font_helvB08_tr);
+    u8g2.drawStr(32, 12, "MAIN MENU");
+    u8g2.drawLine(0, 16, 128, 16);
+
+    u8g2.setFont(u8g2_font_helvB14_tr);
+    if (menuCursor == 0) 
+    {
+        u8g2.drawStr(10, 40, "> SpO2");
+        u8g2.drawStr(10, 60, "  BPM");
+    } 
+    else 
+    {
+        u8g2.drawStr(10, 40, "  SpO2");
+        u8g2.drawStr(10, 60, "> BPM");
+    }
+}
+
+void drawSpO2() 
+{
+    u8g2.setFont(u8g2_font_helvB08_tr);
+    u8g2.drawStr(0, 12, "SpO2 Monitor");
+    u8g2.drawLine(0, 15, 128, 15);
+
+    int state = spo2Handler.getUIState();
+    
+    if (state == 0) 
+    {
+        u8g2.setFont(u8g2_font_helvB08_tr);
+        u8g2.drawStr(0, 36, "Place Finger...");
+    } 
+    else if (state == 1) 
+    {
+        u8g2.setFont(u8g2_font_helvB08_tr);
+        u8g2.setCursor(0, 36);
+        u8g2.print("Stabilizing: ");
+        u8g2.print(spo2Handler.getWarmupRemainingSeconds());
+        u8g2.print("s");
+    } 
+    else if (state == 2) 
+    {
+        u8g2.setFont(u8g2_font_helvB08_tr);
+        u8g2.setCursor(0, 32);
+        u8g2.print("Recording: ");
+        u8g2.print(spo2Handler.getProgress());
+        u8g2.print("%");
+
+        u8g2.drawFrame(0, 42, 128, 10);
+        u8g2.drawBox(2, 44, (spo2Handler.getProgress() * 124) / 100, 6);
+    } 
+    else if (state == 3) 
+    {
+        u8g2.setFont(u8g2_font_logisoso22_tr);
+        u8g2.setCursor(10, 44);
+        u8g2.print(spo2Handler.getFinalResult(), 1);
+
+        u8g2.setFont(u8g2_font_helvB10_tr);
+        u8g2.print(" %");
+
+        u8g2.setFont(u8g2_font_helvB08_tr);
+        u8g2.setCursor(0, 60);
+        u8g2.print("Updating: ");
+        u8g2.print(spo2Handler.getProgress());
+        u8g2.print("%");
+
+        u8g2.drawFrame(70, 53, 58, 8);
+        u8g2.drawBox(72, 55, (spo2Handler.getProgress() * 54) / 100, 4);
+    }
+}
+
+
+void drawBPM() 
+{
+    u8g2.setFont(u8g2_font_helvB08_tr);
+    u8g2.drawStr(0, 12, "BPM Monitor");
+    u8g2.drawLine(0, 16, 128, 16);
+
+    if (bpm_ui_state == 0) 
+    {
+        u8g2.drawStr(0, 32, "Place Finger...");
+        
+    } 
+    else if (bpm_ui_state == 1) 
+    {
+        u8g2.setFont(u8g2_font_helvB08_tr);
+        u8g2.drawStr(0, 32, "Warming up...");
+
+        u8g2.drawFrame(0, 42, 128, 10);
+
+        unsigned long elapsedTime = millis() - bpm_startTime;
+        if (elapsedTime > WARM_UP_INTERVAL)
+            elapsedTime = WARM_UP_INTERVAL;
+
+        u8g2.drawBox(2, 44, ((elapsedTime * 124) / WARM_UP_INTERVAL), 6);
+    } 
+    else if (bpm_ui_state == 2) 
+    {
+        if (bpm_final_result > 0) 
+        {
+            // Thin Progress Bar
+            unsigned long elapsedTime = millis() - bpm_lastDisplayTime;
+            if (elapsedTime > DISPLAY_INTERVAL)
+                elapsedTime = DISPLAY_INTERVAL;
+
+            int lineOffset = ((elapsedTime * 64) / DISPLAY_INTERVAL) + 32;
+            u8g2.drawLine(32, 60, lineOffset, 60);
+
+            // bpm_final_result in c-syle str
+            char bpm_buff[5];
+            snprintf(bpm_buff, sizeof(bpm_buff), "%d", static_cast<int>(bpm_final_result));
+
+            // Dynamic Display
+            u8g2.setFont(u8g2_font_logisoso24_tr); // bpm_final_result
+            int w_num   = u8g2.getStrWidth(bpm_buff);
+            u8g2.setFont(u8g2_font_logisoso16_tr); // BPM unit
+            int w_bpm   = u8g2.getStrWidth("BPM");
+            int spacing = 4;                       // Spacing
+            int start_x = (u8g2.getDisplayWidth() - (w_bpm + w_num + spacing)) / 2; // Dynamic BPM num
+            int bpm_spacing_unit = start_x + w_num + spacing;                       // Dynamic BPM unit
+
+            // Final BPM Result
+            u8g2.setFont(u8g2_font_logisoso24_tr);
+            u8g2.drawStr(start_x, 50, bpm_buff);
+
+            // BPM Unit
+            u8g2.setFont(u8g2_font_logisoso16_tf);
+            u8g2.drawStr(bpm_spacing_unit, 50, "BPM");
         }
     }
+}
 
-    if (digitalRead(BTN_SELECT) == LOW && (now - lastSelPress > DEBOUNCE_DELAY)) {
-        lastSelPress = now;
-        if (systemState == 0) {
-            systemState = menuCursor; 
-            if (systemState == 1) {
-                resetSignalProcessingSpO2();
-                particleSensor.clearFIFO();
-            } else if (systemState == 2) {
-                resetSignalProcessingBPM();
-                particleSensor.clearFIFO();
-            }
-        } else {
-            systemState = 0; 
-        }
+void updateUI() 
+{
+    if (millis() - lastDrawTime < 200) 
+        return; 
+
+    lastDrawTime = millis();
+
+    u8g2.clearBuffer();
+
+    if (systemState == 0) 
+    {
+        drawMenu();
+    } 
+    else if (systemState == 1) 
+    {
+        drawSpO2();
+    } 
+    else if (systemState == 2) 
+    {
+        drawBPM();
     }
 
+    u8g2.sendBuffer();
+}
+
+// ---------------------------------------------------------
+// Sensor Functions
+// ---------------------------------------------------------
+void readSensor() 
+{
     particleSensor.check();
-    while (particleSensor.available()) {
+    
+    while (particleSensor.available()) 
+    {
         uint32_t irRaw = particleSensor.getFIFOIR();
         uint32_t redRaw = particleSensor.getFIFORed();
-        particleSensor.nextSample();
 
         if (systemState == 1) {
-            processSpO2(irRaw, redRaw);
+            spo2Handler.process(irRaw, redRaw);
         } else if (systemState == 2) {
             processBPM(irRaw);
         }
+        
+        particleSensor.nextSample();
     }
+}
 
-    static unsigned long lastOledUpdate = 0;
-    if (now - lastOledUpdate >= 200) {
-        lastOledUpdate = now;
-        display.clearDisplay();
+// ---------------------------------------------------------
+// Setup & Loop
+// ---------------------------------------------------------
+void setup() 
+{
+    Serial.begin(115200);
 
-        if (systemState == 0) {
-            display.setTextSize(1);
-            display.setCursor(30, 0);
-            display.println("MAIN MENU");
-            display.drawLine(0, 10, 128, 10, SSD1306_WHITE);
+    u8g2.begin();
 
-            display.setCursor(10, 25);
-            if (menuCursor == 1) display.print("> "); else display.print("  ");
-            display.println("SpO2");
+    btnNav.begin(BTN_NAVIGATE);
+    btnSel.begin(BTN_SELECT);
+    btnNav.setTapHandler(onNavClick);
+    btnSel.setTapHandler(onSelClick);
 
-            display.setCursor(10, 40);
-            if (menuCursor == 2) display.print("> "); else display.print("  ");
-            display.println("BPM");
-
-        } else if (systemState == 1) {
-            display.setTextSize(1);
-            display.setCursor(0, 0);
-            display.println("Mode: SpO2");
-            display.drawLine(0, 10, 128, 10, SSD1306_WHITE);
-
-            if (spo2_ui_state == 0) {
-                display.setCursor(0, 30);
-                display.println("Place Finger...");
-            } else if (spo2_ui_state == 1) {
-                display.setCursor(0, 25);
-                display.println("Stabilizing...");
-                display.setCursor(0, 40);
-                display.print("Wait: ");
-                display.print(spo2_dc_warmup_sec, 1);
-                display.println(" s");
-            } else if (spo2_ui_state == 2) {
-                display.setCursor(0, 25);
-                display.println("Recording...");
-                display.setCursor(0, 40);
-                display.print("Progress: ");
-                display.print(spo2_progress);
-                display.println("%");
-            } else if (spo2_ui_state == 3) {
-                display.setCursor(0, 20);
-                display.println("SpO2 Result:");
-                display.setTextSize(3);
-                display.setCursor(20, 35);
-                display.print((int)spo2_final_result);
-                display.setTextSize(2);
-                display.print("%");
-            }
-
-        } else if (systemState == 2) {
-            display.setTextSize(1);
-            display.setCursor(0, 0);
-            display.println("Mode: BPM");
-            display.drawLine(0, 10, 128, 10, SSD1306_WHITE);
-
-            if (bpm_ui_state == 0) {
-                display.setCursor(0, 30);
-                display.println("Place Finger...");
-            } else if (bpm_ui_state == 1) {
-                display.setCursor(0, 30);
-                display.println("Warming up...");
-            } else if (bpm_ui_state == 2) {
-                display.setCursor(0, 20);
-                display.println("Heart Rate:");
-                display.setTextSize(3);
-                display.setCursor(20, 35);
-                if (bpm_final_result > 0) {
-                    display.print((int)bpm_final_result);
-                    display.setTextSize(1);
-                    display.print(" BPM");
-                } else {
-                    display.setTextSize(2);
-                    display.print("Reading...");
-                }
-            }
-        }
-        display.display();
+    if (!particleSensor.begin(Wire, I2C_SPEED_FAST)) 
+    {
+        u8g2.clearBuffer();
+        u8g2.setFont(u8g2_font_helvB08_tr);
+        u8g2.drawStr(0, 20, "MAX30105 Not Found! Please Reset.");
+        u8g2.sendBuffer();
+        while (1);
     }
+    
+    // ---------------------------------------------------------
+    // Particle Sensor Setup
+        // ledBrightness=0x3F=60, 
+        // sampleAverage=1, 
+        // ledMode=2, 
+        // sampleRate=100, 
+        // pulseWidth=411, 
+        // adcRange=4096
+    // ---------------------------------------------------------
+    particleSensor.setup(0x3F, 1, 2, 100, 411, 4096);
+    particleSensor.clearFIFO();
+}
+
+void loop() 
+{
+    btnNav.loop();
+    btnSel.loop();
+    
+    readSensor();
+    
+    updateUI();
 }

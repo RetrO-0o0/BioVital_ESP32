@@ -1,134 +1,272 @@
 #include "BPMHandler.hpp"
 
-IIRFilter::IIRFilter(float b0, float b1, float b2, float a1, float a2) {
-    b[0] = b0; b[1] = b1; b[2] = b2;
-    a[0] = a1; a[1] = a2;
+// -----------------------------------------------
+// Class IIRFilter
+// -----------------------------------------------
+IIRFilter::IIRFilter(double b0_, double b1_, double b2_, double a1_, double a2_)
+{
+    this->b0 = b0_;
+    this->b1 = b1_;
+    this->b2 = b2_;
+    this->a1 = a1_;
+    this->a2 = a2_;
 }
 
-float IIRFilter::process(float in) {
-    x[0] = x[1]; x[1] = x[2]; x[2] = in;
-    y[0] = y[1]; y[1] = y[2];
-    y[2] = b[0]*x[2] + b[1]*x[1] + b[2]*x[0] - a[0]*y[1] - a[1]*y[0];
-    return y[2];
+double IIRFilter::process(float in)
+{
+    double x = static_cast<double>(in);
+
+    double y = b0 * x + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2;
+
+    this->x2 = this->x1;
+    this->x1 = x;
+    this->y2 = this->y1;
+    this->y1 = y;
+
+    return y;
 }
 
-void IIRFilter::reset() {
-    x[0] = x[1] = x[2] = 0;
-    y[0] = y[1] = y[2] = 0;
+void IIRFilter::reset()
+{
+    this->x1 = 0.0;
+    this->x2 = 0.0;
+    this->y1 = 0.0;
+    this->y2 = 0.0;
 }
 
-float MovingAverage::process(float in) {
-    sum -= buf[idx];
-    buf[idx] = in;
-    sum += in;
-    idx = (idx + 1) % N;
-    return sum / N;
+// -----------------------------------------------
+// Class MovingAverage
+// -----------------------------------------------
+double MovingAverage::process(double in) 
+{
+    this->sum -= this->buffer[this->idx];
+
+    this->buffer[this->idx] = in;
+    
+    this->sum += in;
+    
+    this->idx = (this->idx + 1) % this->N;
+    
+    return static_cast<double>(this->sum / this->N);
 }
 
-void MovingAverage::reset() {
-    for (int i = 0; i < N; i++) buf[i] = 0;
-    sum = 0;
-    idx = 0;
+void MovingAverage::reset() 
+{
+    for (int i = 0; i < this->N; i++)
+        this->buffer[i] = 0.0;
+
+    this->sum = 0.0;
+    this->idx = 0;
 }
 
-float PeakDetector::process(float x) {
-    unsigned long now = millis();
-    if (prev_x < 0 && x >= 0) {
-        if (lastPeakTime != 0) {
-            float dt = now - lastPeakTime;
-            if (dt >= 333 && dt <= 1500) {
-                float currentBPM = 60000.0f / dt;
-                float allowedMaxBPM = 60000.0f / (smoothedPeakInterval - 30);
-                float allowedMinBPM = 60000.0f / (smoothedPeakInterval + 30);
-                if (currentBPM >= allowedMinBPM && currentBPM <= allowedMaxBPM) {
-                    smoothedPeakInterval = 0.8f * smoothedPeakInterval + 0.2f * dt;
-                    lastValidBPM = 60000.0f / smoothedPeakInterval;
+// -----------------------------------------------
+// Class PeakDetector
+// -----------------------------------------------
+bool PeakDetector::process(double sample)
+    {
+        // First initialization
+        // Don't process the first sample
+        if (!this->initialized)
+        {
+            this->lastSample  = sample;
+            this->initialized = true;
+            return false;
+        }
+
+        // Zero crossing
+        bool peak = (this->lastSample < 0.0) && (sample >= 0.0);
+        
+        if (peak)
+        {
+            unsigned long currentTime = millis();
+
+            if (this->lastPeakTime != 0)
+            {
+                unsigned long interval = currentTime - this->lastPeakTime;
+                // char buff[50];
+                // sprintf(buff, "Interval in peakDetector: %lu", interval);
+                // serial.println(buff);
+                
+                // ------------------------------------------------
+                // Physiological BPM range:
+                // 40 BPM -> 1500 ms
+                // 180 BPM -> 333 ms
+                // ------------------------------------------------
+                if (interval > 333 && interval < 1500)
+                {
+                    double instantaneousBPM = 60000.0f / static_cast<double>(interval);
+                    // sprintf(buff, "rawBPM: %f", instantaneousBPM);
+                    
+                    // --------------------------------------------
+                    // Rate limiter
+                    // Maximum change = 3 BPM per beat
+                    // --------------------------------------------
+                    const double MAX_CHANGE = 3.0;
+
+                    if (instantaneousBPM > this->calculatedBPM + MAX_CHANGE)
+                    {
+                        this->calculatedBPM += MAX_CHANGE;
+                    }
+                    else if (instantaneousBPM < this->calculatedBPM - MAX_CHANGE)
+                    {
+                        this->calculatedBPM -= MAX_CHANGE;
+                    }
+                    else
+                    {
+                        // Exponential smoothing
+                        this->calculatedBPM = 0.8f * this->calculatedBPM + 0.2f * instantaneousBPM;
+                    }
+
+                    this->lastPeakTime = currentTime;
+                    this->lastSample   = sample;
+
+                    return true;
+                }
+                // Deadlock revival
+                else if (interval >= 1500)
+                {
+                    this->lastPeakTime = currentTime; 
                 }
             }
+            else
+            {
+                // First valid peak
+                this->lastPeakTime = currentTime;
+            }
         }
-        lastPeakTime = now;
+
+        this->lastSample = sample;
+
+        return false;
     }
-    prev_x = x;
-    return lastValidBPM;
+
+void PeakDetector::reset() 
+{
+    this->lastSample    = 0.0;
+    this->lastPeakTime  = 0;
+    this->calculatedBPM = 75.0;
+    this->initialized   = false;
 }
 
-void PeakDetector::reset() {
-    prev_x = 0;
-    lastPeakTime = 0;
-    smoothedPeakInterval = 800.0f;
-    lastValidBPM = 0;
+double PeakDetector::getBPM() const
+{
+    return this->calculatedBPM;
 }
 
-void Smoothing::addSample(float val) {
-    if (val <= 0) return;
-    sum -= buf[idx];
-    buf[idx] = val;
-    sum += val;
-    idx = (idx + 1) % N;
-    if (count < N) count++;
+// -----------------------------------------------
+// Class Smoothing
+// -----------------------------------------------
+void Smoothing::process(PeakDetector input)
+{
+    this->sum -= buffer[this->idx];
+    
+    this->buffer[this->idx] = input.getBPM();
+    
+    this->sum += input.getBPM();
+    
+    this->idx = (this->idx + 1) % this->N;
+    
+    this->avg =  this->sum / this->N;
 }
 
-float Smoothing::getAverage() {
-    if (count == 0) return 0;
-    return sum / count;
+double Smoothing::getAvg() const
+{
+    return this->avg;
 }
 
-void Smoothing::reset() {
-    for (int i = 0; i < N; i++) buf[i] = 0;
-    sum = 0;
-    idx = 0;
-    count = 0;
+void Smoothing::reset() 
+{
+    for (int i = 0; i < this->N; i++)
+        this->buffer[i] = 0.0;
+
+    this->sum = 0.0;
+    this->idx = 0;
 }
 
-IIRFilter highPass(0.978f, -1.956f, 0.978f, -1.9556f, 0.9565f);
-IIRFilter lowPass(0.01336f, 0.02672f, 0.01336f, -1.6475f, 0.7009f);
+// -----------------------------------------------
+// Objects
+// -----------------------------------------------
+IIRFilter highPass(
+    0.978030479,
+   -1.956060958,
+    0.978030479,
+   -1.955578240,
+    0.956543676
+);
+
+IIRFilter lowPass(
+    0.013359200,
+    0.026718400,
+    0.013359200,
+   -1.647459981,
+    0.700896781
+);
+
 MovingAverage movAvg;
-PeakDetector peakDet;
-Smoothing bpmSmoothing;
+PeakDetector  peakDet;
+Smoothing     bpmSmoothing;
 
-const unsigned long WARM_UP_INTERVAL = 6000;
-const unsigned long DISPLAY_INTERVAL = 3000;
+// -----------------------------------------------
+// Variables
+// -----------------------------------------------
+uint8_t             bpm_ui_state        {0};   // 0: no finger | 1: Warmup | 2: Ready
+double              bpm_final_result    {0.0};
+unsigned long       bpm_startTime       {0};
+const unsigned long WARM_UP_INTERVAL    {6000}; // Warmup for 6s
+const unsigned long DISPLAY_INTERVAL    {3000}; // Display after 3s
+unsigned long       bpm_lastDisplayTime {0};
 
-unsigned long bpm_startTime = 0;
-unsigned long bpm_lastDisplayTime = 0;
-int bpm_ui_state = 0;
-float bpm_final_result = 0.0f;
-
-void resetSignalProcessingBPM() {
+// -----------------------------------------------
+// Functions
+// -----------------------------------------------
+void resetSignalProcessingBPM() 
+{
     highPass.reset();
     lowPass.reset();
     movAvg.reset();
     peakDet.reset();
     bpmSmoothing.reset();
+
     bpm_startTime = millis();
     bpm_lastDisplayTime = millis();
+
     bpm_ui_state = 0;
-    bpm_final_result = 0.0f;
+    bpm_final_result = 0.0;
 }
 
-void processBPM(uint32_t irRaw) {
-    if (irRaw < 30000) {
+void processBPM(uint32_t irRaw) 
+{
+    if (irRaw < 30000) 
+    {
         resetSignalProcessingBPM();
         return;
     }
 
     unsigned long now = millis();
-    float hp = highPass.process((float)irRaw);
-    float lp = lowPass.process(hp);
-    float ma = movAvg.process(lp);
-    float currentBPM = peakDet.process(ma);
+    
+    double hp         = highPass.process(static_cast<double>(irRaw)); // HIGH-PASS
+    double lp         = lowPass.process(hp);                          // LOW-PASS
+    double ma         = movAvg.process(lp);                           // MOVING AVERAGE
+    bool   currentBPM = peakDet.process(ma);                          // PEAK DETECTION
 
-    if (now - bpm_startTime < WARM_UP_INTERVAL) {
+    if (now - bpm_startTime < WARM_UP_INTERVAL) 
+    {
         bpm_ui_state = 1; 
-    } else {
-        bpm_ui_state = 2; 
-        if (currentBPM > 0) {
-            bpmSmoothing.addSample(currentBPM);
+    } 
+    else 
+    {
+        bpm_ui_state = 2;
+
+        if (currentBPM) 
+        {
+            bpmSmoothing.process(peakDet);
         }
-        if (now - bpm_lastDisplayTime >= DISPLAY_INTERVAL) {
+
+        if (now - bpm_lastDisplayTime >= DISPLAY_INTERVAL) 
+        {
             bpm_lastDisplayTime = now;
-            bpm_final_result = bpmSmoothing.getAverage();
+
+            bpm_final_result = bpmSmoothing.getAvg();
         }
     }
 }
-

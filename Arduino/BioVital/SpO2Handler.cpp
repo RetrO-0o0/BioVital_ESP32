@@ -1,101 +1,112 @@
 #include "SpO2Handler.hpp"
-#include <math.h>
 
-float irACBuffer[WINDOW_SIZE];
-float redACBuffer[WINDOW_SIZE];
-int sampleIndex = 0;
-int sampleCount = 0;
+SpO2Handler::SpO2Handler() 
+{
+    reset();
+}
 
-float dcIR = 0;
-float dcRed = 0;
-float prevRawIR = 0;
-float prevRawRed = 0;
-float prevACIR = 0;
-float prevACRed = 0;
-
-float spo2_final_result = 0.0f;
-int spo2_ui_state = 0;
-int spo2_progress = 0;
-float spo2_dc_warmup_sec = 0.0f;
-
-void resetSignalProcessingSpO2() {
-    sampleIndex = 0;
-    sampleCount = 0;
-    dcIR = 0;
-    dcRed = 0;
-    prevRawIR = 0;
-    prevRawRed = 0;
-    prevACIR = 0;
-    prevACRed = 0;
+void SpO2Handler::reset() 
+{
+    is_initialized    = false;
+    sampleCount       = 0;
+    warmupCount       = 0;
+    spo2_ui_state     = 0;
     spo2_final_result = 0.0f;
-    spo2_ui_state = 0;
-    spo2_progress = 0;
-    spo2_dc_warmup_sec = 0.0f;
+    spo2_progress     = 0;
+    dcIR              = 0.0f;
+    dcRed             = 0.0f;
+    w_ir              = 0.0f;
+    w_red             = 0.0f;
 }
 
-void processSpO2(uint32_t irRaw, uint32_t redRaw) {
-    if (irRaw < 30000) {
-        resetSignalProcessingSpO2();
+void SpO2Handler::process(long irRaw, long redRaw) 
+{
+    if (irRaw < 30000) 
+    {
+        reset();
         return;
     }
 
-    if (dcIR == 0) {
-        dcIR = irRaw;
-        dcRed = redRaw;
-        prevRawIR = irRaw;
-        prevRawRed = redRaw;
+    if (!is_initialized) 
+    {
+        dcIR           = static_cast<float>(irRaw);
+        dcRed          = static_cast<float>(redRaw);
+        w_ir           = static_cast<float>(irRaw);
+        w_red          = static_cast<float>(redRaw);
+        is_initialized = true;
+    }
+
+    dcIR  = 0.99f * dcIR  + 0.01f * static_cast<float>(irRaw);
+    dcRed = 0.99f * dcRed + 0.01f * static_cast<float>(redRaw);
+
+    const float alpha = 0.95f;
+    float w_ir_new    = static_cast<float>(irRaw) + alpha * w_ir;
+    float acIR        = w_ir_new - w_ir;
+    w_ir              = w_ir_new;
+
+    float w_red_new = static_cast<float>(redRaw) + alpha * w_red;
+    float acRed     = w_red_new - w_red;
+    w_red           = w_red_new;
+
+    if (warmupCount < 300) 
+    {
+        warmupCount++;
+        spo2_ui_state = 1;
         return;
     }
 
-    dcIR = 0.99f * dcIR + 0.01f * irRaw;
-    dcRed = 0.99f * dcRed + 0.01f * redRaw;
+    irACBuffer[sampleCount]  = acIR;
+    redACBuffer[sampleCount] = acRed;
+    sampleCount++;
 
-    float acIR = 0.95f * (prevACIR + (float)irRaw - prevRawIR);
-    float acRed = 0.95f * (prevACRed + (float)redRaw - prevRawRed);
+    spo2_ui_state = (spo2_ui_state == 3) ? 3 : 2;
+    spo2_progress = sampleCount / 10;
 
-    prevRawIR = irRaw;
-    prevRawRed = redRaw;
-    prevACIR = acIR;
-    prevACRed = acRed;
+    if (sampleCount >= WINDOW_SIZE) 
+    {
+        float irAcSqSum = 0.0f;
+        float redAcSqSum = 0.0f;
 
-    if (sampleCount < 300) {
-        sampleCount++;
-        spo2_ui_state = 1; 
-        spo2_dc_warmup_sec = (300 - sampleCount) / 100.0f;
-        return;
-    }
-
-    irACBuffer[sampleIndex] = acIR;
-    redACBuffer[sampleIndex] = acRed;
-
-    sampleIndex = (sampleIndex + 1) % WINDOW_SIZE;
-    if (sampleCount < WINDOW_SIZE) sampleCount++;
-
-    spo2_progress = (sampleCount * 100) / WINDOW_SIZE;
-
-    if (sampleCount < WINDOW_SIZE) {
-        spo2_ui_state = 2; 
-    } else {
-        spo2_ui_state = 3; 
-
-        float sumSqIR = 0, sumSqRed = 0;
-        for (int i = 0; i < WINDOW_SIZE; i++) {
-            sumSqIR += irACBuffer[i] * irACBuffer[i];
-            sumSqRed += redACBuffer[i] * redACBuffer[i];
+        for (int i = 0; i < WINDOW_SIZE; i++) 
+        {
+            irAcSqSum += irACBuffer[i] * irACBuffer[i];
+            redAcSqSum += redACBuffer[i] * redACBuffer[i];
         }
 
-        float rmsIR = sqrt(sumSqIR / WINDOW_SIZE);
-        float rmsRed = sqrt(sumSqRed / WINDOW_SIZE);
+        float acIR_RMS  = sqrtf(irAcSqSum / WINDOW_SIZE);
+        float acRed_RMS = sqrtf(redAcSqSum / WINDOW_SIZE);
 
-        if (dcIR > 0 && dcRed > 0 && rmsRed > 0) {
-            float R = (rmsIR / dcIR) / (rmsRed / dcRed);
-            float calculatedSpO2 = -45.060f * R * R + 30.354f * R + 94.845f;
+        if (dcIR > 0.0f && dcRed > 0.0f && acIR_RMS > 0.0f) 
+        {
+            float R            = (acIR_RMS / dcIR) / (acRed_RMS / dcRed);
+            float current_spo2 = -45.060f * R * R + 30.354f * R + 94.845f;
 
-            if (calculatedSpO2 > 100.0f) calculatedSpO2 = 100.0f;
-            if (calculatedSpO2 < 0.0f) calculatedSpO2 = 0.0f;
+            if (current_spo2 > 100.0f) current_spo2 = 100.0f;
+            if (current_spo2 < 0.0f) current_spo2   = 0.0f;
 
-            spo2_final_result = calculatedSpO2;
+            spo2_final_result = current_spo2;
+            spo2_ui_state     = 3;
         }
+        sampleCount = 0;
     }
 }
 
+int SpO2Handler::getUIState() const 
+{
+    return spo2_ui_state;
+}
+
+float SpO2Handler::getFinalResult() const 
+{
+    return spo2_final_result;
+}
+
+int SpO2Handler::getProgress() const 
+{
+    return spo2_progress;
+}
+
+int SpO2Handler::getWarmupRemainingSeconds() const 
+{
+    return 3 - (warmupCount / 100);
+}

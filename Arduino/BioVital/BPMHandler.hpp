@@ -1,65 +1,109 @@
-#ifndef BPM_HANDLER_HPP
-#define BPM_HANDLER_HPP
+#pragma once
 
 #include <Arduino.h>
+#include <stdint.h>
 
-class IIRFilter {
+// -----------------------------------------------
+// Class IIRFilter
+// -----------------------------------------------
+class IIRFilter
+{
 private:
-    float b[3], a[2];
-    float x[3] = {0}, y[3] = {0};
+    double b0, b1, b2;
+    double a1, a2;
+
+    double x1 {0};
+    double x2 {0};
+    double y1 {0};
+    double y2 {0};
+
 public:
-    IIRFilter(float b0, float b1, float b2, float a1, float a2);
-    float process(float in);
+    IIRFilter(double b0_, double b1_, double b2_, double a1_, double a2_);
+
+    double process(float in);
+
     void reset();
 };
 
-class MovingAverage {
+// -----------------------------------------------
+// Class MovingAverage
+// -----------------------------------------------
+class MovingAverage
+{
 private:
-    static const int N = 10;
-    float buf[N] = {0};
-    int idx = 0;
-    float sum = 0;
+
+    static constexpr int N           {10};
+    double               buffer[N] = {0.0};
+    double               sum         {0.0};
+    uint8_t              idx         {0};
+
 public:
-    float process(float in);
+
+    double process(double input);
+
     void reset();
 };
 
-class PeakDetector {
+// -----------------------------------------------
+// Class PeakDetector
+// -----------------------------------------------
+class PeakDetector
+{
 private:
-    float prev_x = 0;
-    unsigned long lastPeakTime = 0;
-    float smoothedPeakInterval = 800.0f;
-    float lastValidBPM = 0;
+
+    double        lastSample     {0.0};
+    unsigned long lastPeakTime   {0};
+    double        calculatedBPM  {75.0};
+    bool          initialized    {false};
+
 public:
-    float process(float x);
+
+    bool process(double sample);
+
+    double getBPM() const;
+
     void reset();
 };
 
-class Smoothing {
+// -----------------------------------------------
+// Class Smoothing
+// -----------------------------------------------
+class Smoothing
+{
 private:
-    static const int N = 5;
-    float buf[N] = {0};
-    int idx = 0;
-    float sum = 0;
-    int count = 0;
+
+    static constexpr int N           {5};
+    double               buffer[N] = {0.0};
+    double               sum         {0.0};
+    double               avg         {0.0};
+    uint8_t              idx         {0};
+
 public:
-    void addSample(float val);
-    float getAverage();
+    void process(PeakDetector input);
+
     void reset();
+
+    double getAvg() const;
 };
 
-extern IIRFilter highPass;
-extern IIRFilter lowPass;
+// -----------------------------------------------
+// Objects and Variables
+// -----------------------------------------------
+extern IIRFilter     highPass;
+extern IIRFilter     lowPass;
 extern MovingAverage movAvg;
-extern PeakDetector peakDet;
-extern Smoothing bpmSmoothing;
+extern PeakDetector  peakDet;
+extern Smoothing     bpmSmoothing;
 
-extern unsigned long bpm_startTime;
-extern unsigned long bpm_lastDisplayTime;
-extern int bpm_ui_state; 
-extern float bpm_final_result;
+extern unsigned long       bpm_startTime;
+extern unsigned long       bpm_lastDisplayTime;
+extern uint8_t             bpm_ui_state;
+extern double              bpm_final_result;
+extern const unsigned long WARM_UP_INTERVAL;
+extern const unsigned long DISPLAY_INTERVAL;
 
+// -----------------------------------------------
+// Functions
+// -----------------------------------------------
 void resetSignalProcessingBPM();
 void processBPM(uint32_t irRaw);
-
-#endif // BPM_HANDLER_HPP
